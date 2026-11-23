@@ -4,81 +4,203 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="refresh" content="300" />
-  <title>QQQ/SPY 与 A股ETF 盘中监控</title>
+  <title>QQQ / SPY 与 A股跨境 ETF 盘中监控</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; color: #1f2937; margin: 0; padding: 16px; }
     .container { max-width: 1080px; margin: 0 auto; }
     header { margin-bottom: 16px; }
     header h1 { margin: 0 0 6px; font-size: 20px; }
     .meta { color: #6b7280; font-size: 12px; }
-    .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
     .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
     .card-header h2 { margin: 0; font-size: 16px; }
     .badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
     .badge-ok { background: #ecfdf5; color: #047857; }
     .badge-warn { background: #fffbeb; color: #b45309; }
     .badge-danger { background: #fef2f2; color: #b91c1c; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-bottom: 14px; }
     .box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
     .box.highlight { background: #eff6ff; border-color: #bfdbfe; }
     .label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-    .value { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-    .sub { font-size: 12px; color: #4b5563; line-height: 1.5; }
-    .up { color: #dc2626; font-size: 14px; }
-    .down { color: #16a34a; font-size: 14px; }
+    .value { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .sub { font-size: 12px; color: #374151; line-height: 1.6; }
+    .muted { color: #6b7280; font-size: 11px; margin-top: 2px; }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
-    th, td { padding: 8px 6px; border-bottom: 1px solid #e5e7eb; text-align: right; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 540px; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid #e5e7eb; text-align: right; vertical-align: middle; }
     th:first-child, td:first-child { text-align: left; }
     th { background: #f9fafb; color: #4b5563; font-weight: 600; }
+    tr.active-zone { background: #eff6ff; }
+    .zone-tag { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .now-pill { display: inline-block; background: #2563eb; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
       <h1>QQQ / SPY 与 A股跨境 ETF 盘中监控</h1>
-      <div class="meta">更新时间（北京时间）：2026-11-23 19:23:24 ｜ USD/CNH：6.6664</div>
+      <div class="meta">更新时间（北京时间）：2026-11-23 21:42:13 ｜ USD/CNH：6.6680 ｜ 交易日 10:00 及 10:30-15:10 每 10 分钟刷新</div>
     </header>
     
         <section class="card">
           <div class="card-header">
             <h2>纳斯达克 100：QQQ vs 嘉实纳指100ETF (159501)</h2>
-            <span class="badge badge-danger">实时溢价 +23.49%</span>
+            <span class="badge badge-danger">实时溢价 +23.46%</span>
           </div>
+
           <div class="grid">
             <div class="box">
               <div class="label">美股 QQQ 收盘价（2026-11-20）</div>
-              <div class="value">$608.45 <span class="down">(-5.67%)</span></div>
-              <div class="sub">前高 $762.86（2026-10-06）</div>
+              <div class="value">$608.45</div>
+              <div class="sub">前高：$762.86（2026-10-06）</div>
               <div class="sub">距前高回撤：<strong>-20.24%</strong></div>
             </div>
+
             <div class="box">
-              <div class="label">A股 159501 实时价</div>
-              <div class="value">¥1.939 <span class="down">(-1.37%)</span></div>
-              <div class="sub">前高 ¥2.255（2026-10-12）</div>
+              <div class="label">A股 159501 实时价（含溢价）</div>
+              <div class="value">¥1.939</div>
+              <div class="sub">前高：¥2.255（2026-10-12）</div>
               <div class="sub">距前高回撤：<strong>-14.01%</strong></div>
             </div>
+
             <div class="box highlight">
-              <div class="label">当前买入 159501 等效 QQQ 点位</div>
-              <div class="value">$751.35</div>
-              <div class="sub">比美股收盘贵 <strong>$+142.90</strong>（等效距前高 -1.51%）</div>
-              <div class="sub">估算净值 ¥1.5702 ｜ 官方净值 ¥1.5723（2026-11-20）</div>
+              <div class="label">A股 159501 实时估值（不含溢价）</div>
+              <div class="value">¥1.5706</div>
+              <div class="sub">等效 QQQ 点位：<strong>$608.45</strong>（距前高 -20.24%）</div>
+              <div class="sub">估值前高：¥1.9591（2026-06-02）｜ 回撤：<strong>-19.83%</strong></div>
+              <div class="sub muted">官方净值 ¥1.5723（2026-11-20）｜ 净值公式估算</div>
             </div>
           </div>
+
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>QQQ 情景</th>
-                  <th>QQQ 点位</th>
-                  <th>0% 溢价</th>
-                  <th>+3% 溢价</th>
-                  <th>+5% 溢价</th>
-                  <th>当前 (+23.5%)</th>
+                  <th>QQQ 重要点位区间</th>
+                  <th>对应距前高回撤</th>
+                  <th>159501 实时估值区间（不含溢价）</th>
+                  <th>按当前溢价 (+23.5%) 对应盘面价</th>
                 </tr>
               </thead>
               <tbody>
-                <tr><td>-5%</td><td>$578.03</td><td>¥1.492</td><td>¥1.536</td><td>¥1.566</td><td><strong>¥1.842</strong></td></tr><tr><td>-2%</td><td>$596.28</td><td>¥1.539</td><td>¥1.585</td><td>¥1.616</td><td><strong>¥1.900</strong></td></tr><tr><td>昨收</td><td>$608.45</td><td>¥1.570</td><td>¥1.617</td><td>¥1.649</td><td><strong>¥1.939</strong></td></tr><tr><td>+2%</td><td>$620.62</td><td>¥1.602</td><td>¥1.650</td><td>¥1.682</td><td><strong>¥1.978</strong></td></tr><tr><td>+5%</td><td>$638.87</td><td>¥1.649</td><td>¥1.698</td><td>¥1.731</td><td><strong>¥2.036</strong></td></tr>
+                
+              <tr>
+                <td><strong>$687 - $694</strong><div class="zone-tag">（中）</div></td>
+                <td>-9.9% ~ -9.0%</td>
+                <td><strong>¥1.773 ~ ¥1.791</strong></td>
+                <td>¥2.189 ~ ¥2.212</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$668 - $681</strong><div class="zone-tag">（小）</div></td>
+                <td>-12.4% ~ -10.7%</td>
+                <td><strong>¥1.724 ~ ¥1.758</strong></td>
+                <td>¥2.129 ~ ¥2.170</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$642 - $664</strong><div class="zone-tag">（中）长线</div></td>
+                <td>-15.8% ~ -13.0%</td>
+                <td><strong>¥1.657 ~ ¥1.714</strong></td>
+                <td>¥2.046 ~ ¥2.116</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$617 - $635</strong><div class="zone-tag">（超强）长线</div></td>
+                <td>-19.1% ~ -16.8%</td>
+                <td><strong>¥1.593 ~ ¥1.639</strong></td>
+                <td>¥1.966 ~ ¥2.024</td>
+              </tr>
+            
+              <tr class="active-zone">
+                <td><strong>$585 - $610</strong> <span class="now-pill">当前估值所在</span><div class="zone-tag">（超强）长线 重要 破位 大熊市</div></td>
+                <td>-23.3% ~ -20.0%</td>
+                <td><strong>¥1.510 ~ ¥1.575</strong></td>
+                <td>¥1.864 ~ ¥1.944</td>
+              </tr>
+            
+              </tbody>
+            </table>
+          </div>
+        </section>
+        
+        <section class="card">
+          <div class="card-header">
+            <h2>纳斯达克 100：QQQ vs 国泰纳指100ETF (513100)</h2>
+            <span class="badge badge-danger">实时溢价 +22.58%</span>
+          </div>
+
+          <div class="grid">
+            <div class="box">
+              <div class="label">美股 QQQ 收盘价（2026-11-20）</div>
+              <div class="value">$608.45</div>
+              <div class="sub">前高：$762.86（2026-10-06）</div>
+              <div class="sub">距前高回撤：<strong>-20.24%</strong></div>
+            </div>
+
+            <div class="box">
+              <div class="label">A股 513100 实时价（含溢价）</div>
+              <div class="value">¥2.050</div>
+              <div class="sub">前高：¥2.577（2026-06-03）</div>
+              <div class="sub">距前高回撤：<strong>-20.45%</strong></div>
+            </div>
+
+            <div class="box highlight">
+              <div class="label">A股 513100 实时估值（不含溢价）</div>
+              <div class="value">¥1.6724</div>
+              <div class="sub">等效 QQQ 点位：<strong>$608.45</strong>（距前高 -20.24%）</div>
+              <div class="sub">估值前高：¥2.0870（2026-06-02）｜ 回撤：<strong>-19.87%</strong></div>
+              <div class="sub muted">官方净值 ¥1.6742（2026-11-20）｜ 净值公式估算</div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>QQQ 重要点位区间</th>
+                  <th>对应距前高回撤</th>
+                  <th>513100 实时估值区间（不含溢价）</th>
+                  <th>按当前溢价 (+22.6%) 对应盘面价</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+              <tr>
+                <td><strong>$687 - $694</strong><div class="zone-tag">（中）</div></td>
+                <td>-9.9% ~ -9.0%</td>
+                <td><strong>¥1.888 ~ ¥1.908</strong></td>
+                <td>¥2.315 ~ ¥2.338</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$668 - $681</strong><div class="zone-tag">（小）</div></td>
+                <td>-12.4% ~ -10.7%</td>
+                <td><strong>¥1.836 ~ ¥1.872</strong></td>
+                <td>¥2.251 ~ ¥2.294</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$642 - $664</strong><div class="zone-tag">（中）长线</div></td>
+                <td>-15.8% ~ -13.0%</td>
+                <td><strong>¥1.765 ~ ¥1.825</strong></td>
+                <td>¥2.163 ~ ¥2.237</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$617 - $635</strong><div class="zone-tag">（超强）长线</div></td>
+                <td>-19.1% ~ -16.8%</td>
+                <td><strong>¥1.696 ~ ¥1.745</strong></td>
+                <td>¥2.079 ~ ¥2.139</td>
+              </tr>
+            
+              <tr class="active-zone">
+                <td><strong>$585 - $610</strong> <span class="now-pill">当前估值所在</span><div class="zone-tag">（超强）长线 重要 破位 大熊市</div></td>
+                <td>-23.3% ~ -20.0%</td>
+                <td><strong>¥1.608 ~ ¥1.677</strong></td>
+                <td>¥1.971 ~ ¥2.055</td>
+              </tr>
+            
               </tbody>
             </table>
           </div>
@@ -87,42 +209,66 @@
         <section class="card">
           <div class="card-header">
             <h2>标普 500：SPY vs 博时标普500ETF (513500)</h2>
-            <span class="badge badge-danger">实时溢价 +12.05%</span>
+            <span class="badge badge-danger">实时溢价 +12.03%</span>
           </div>
+
           <div class="grid">
             <div class="box">
               <div class="label">美股 SPY 收盘价（2026-11-20）</div>
-              <div class="value">$689.81 <span class="down">(-3.64%)</span></div>
-              <div class="sub">前高 $781.62（2026-10-06）</div>
+              <div class="value">$689.81</div>
+              <div class="sub">前高：$781.62（2026-10-06）</div>
               <div class="sub">距前高回撤：<strong>-11.75%</strong></div>
             </div>
+
             <div class="box">
-              <div class="label">A股 513500 实时价</div>
-              <div class="value">¥2.455 <span class="down">(-0.77%)</span></div>
-              <div class="sub">前高 ¥2.778（2026-08-14）</div>
+              <div class="label">A股 513500 实时价（含溢价）</div>
+              <div class="value">¥2.455</div>
+              <div class="sub">前高：¥2.778（2026-08-14）</div>
               <div class="sub">距前高回撤：<strong>-11.63%</strong></div>
             </div>
+
             <div class="box highlight">
-              <div class="label">当前买入 513500 等效 SPY 点位</div>
-              <div class="value">$772.96</div>
-              <div class="sub">比美股收盘贵 <strong>$+83.15</strong>（等效距前高 -1.11%）</div>
-              <div class="sub">估算净值 ¥2.1909 ｜ 官方净值 ¥2.1938（2026-11-20）</div>
+              <div class="label">A股 513500 实时估值（不含溢价）</div>
+              <div class="value">¥2.1914</div>
+              <div class="sub">等效 SPY 点位：<strong>$689.81</strong>（距前高 -11.75%）</div>
+              <div class="sub">估值前高：¥2.5023（2026-08-13）｜ 回撤：<strong>-12.42%</strong></div>
+              <div class="sub muted">官方净值 ¥2.1938（2026-11-20）｜ 净值公式估算</div>
             </div>
           </div>
+
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>SPY 情景</th>
-                  <th>SPY 点位</th>
-                  <th>0% 溢价</th>
-                  <th>+3% 溢价</th>
-                  <th>+5% 溢价</th>
-                  <th>当前 (+12.1%)</th>
+                  <th>SPY 重要点位区间</th>
+                  <th>对应距前高回撤</th>
+                  <th>513500 实时估值区间（不含溢价）</th>
+                  <th>按当前溢价 (+12.0%) 对应盘面价</th>
                 </tr>
               </thead>
               <tbody>
-                <tr><td>-5%</td><td>$655.32</td><td>¥2.081</td><td>¥2.144</td><td>¥2.185</td><td><strong>¥2.332</strong></td></tr><tr><td>-2%</td><td>$676.01</td><td>¥2.147</td><td>¥2.212</td><td>¥2.254</td><td><strong>¥2.406</strong></td></tr><tr><td>昨收</td><td>$689.81</td><td>¥2.191</td><td>¥2.257</td><td>¥2.300</td><td><strong>¥2.455</strong></td></tr><tr><td>+2%</td><td>$703.61</td><td>¥2.235</td><td>¥2.302</td><td>¥2.346</td><td><strong>¥2.504</strong></td></tr><tr><td>+5%</td><td>$724.30</td><td>¥2.300</td><td>¥2.369</td><td>¥2.415</td><td><strong>¥2.578</strong></td></tr>
+                
+              <tr>
+                <td><strong>$702 - $710</strong><div class="zone-tag">（中）长线 高点回撤10%修正区域</div></td>
+                <td>-10.2% ~ -9.2%</td>
+                <td><strong>¥2.230 ~ ¥2.256</strong></td>
+                <td>¥2.498 ~ ¥2.527</td>
+              </tr>
+            
+              <tr class="active-zone">
+                <td><strong>$671 - $694</strong> <span class="now-pill">当前估值所在</span><div class="zone-tag">（超强）止跌 长线</div></td>
+                <td>-14.2% ~ -11.2%</td>
+                <td><strong>¥2.132 ~ ¥2.205</strong></td>
+                <td>¥2.388 ~ ¥2.470</td>
+              </tr>
+            
+              <tr>
+                <td><strong>$648 - $667</strong><div class="zone-tag">（强）止跌 长线 重要 破位 大熊市</div></td>
+                <td>-17.1% ~ -14.7%</td>
+                <td><strong>¥2.059 ~ ¥2.119</strong></td>
+                <td>¥2.306 ~ ¥2.374</td>
+              </tr>
+            
               </tbody>
             </table>
           </div>
