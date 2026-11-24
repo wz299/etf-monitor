@@ -3,63 +3,22 @@
 
 import json
 import re
-import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 # ================= 配置项 =================
 OUTPUT_HTML = Path(__file__).resolve().parent / "index.html"
-LOOKBACK_DAYS = 250   # 250 ≈ 52周前高；如需更长周期可调大
+LOOKBACK_DAYS = 250   # 250 ≈ 52周前高
 EQUITY_WEIGHT = 0.95  # 降级推算时的权益仓位权重
-TIMEOUT = 15
+TIMEOUT = (5, 8)      # (连接超时5秒, 读取超时8秒)
 BJT = timezone(timedelta(hours=8))
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": "https://quote.eastmoney.com/",
-    "Connection": "close",
 }
 
-# 构建带自动重试的 Session
-SESSION = requests.Session()
-RETRY_STRATEGY = Retry(
-    total=4,
-    connect=4,
-    read=4,
-    backoff_factor=1.5,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
-)
-ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
-SESSION.mount("http://", ADAPTER)
-SESSION.mount("https://", ADAPTER)
-
-
-def safe_get(url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> requests.Response:
-    """带间隔与重试保护的 GET 请求"""
-    time.sleep(0.5)
-    req_headers = HEADERS.copy()
-    if headers:
-        req_headers.update(headers)
-    last_err = None
-    for attempt in range(4):
-        try:
-            resp = SESSION.get(url, params=params, headers=req_headers, timeout=TIMEOUT)
-            resp.raise_for_status()
-            return resp
-        except Exception as e:
-            last_err = e
-            time.sleep(1.5 * (attempt + 1))
-    raise last_err
-
-
-# 重要点位配置（可随时按你的技术面判断调整）
 QQQ_ZONES = [
     {"low": 687, "high": 694, "tag": "（中）"},
     {"low": 668, "high": 681, "tag": "（小）"},
@@ -78,73 +37,119 @@ PAIRS = [
     {
         "group": "纳斯达克 100",
         "us_name": "QQQ",
-        "us_secid": "105.QQQ",
         "cn_name": "嘉实纳指100ETF",
         "cn_code": "159501",
-        "cn_secid": "0.159501",
+        "cn_market": "sz",
         "zones": QQQ_ZONES,
     },
     {
         "group": "纳斯达克 100",
         "us_name": "QQQ",
-        "us_secid": "105.QQQ",
         "cn_name": "国泰纳指100ETF",
         "cn_code": "513100",
-        "cn_secid": "1.513100",
+        "cn_market": "sh",
         "zones": QQQ_ZONES,
     },
     {
         "group": "标普 500",
         "us_name": "SPY",
-        "us_secid": "107.SPY",
         "cn_name": "博时标普500ETF",
         "cn_code": "513500",
-        "cn_secid": "1.513500",
+        "cn_market": "sh",
         "zones": SPY_ZONES,
     },
 ]
 
 
+def safe_get(url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> requests.Response:
+    req_headers = HEADERS.copy()
+    if headers:
+        req_headers.update(headers)
+    last_err = None
+    for _ in range(2):
+        try:
+            resp = requests.get(url, params=params, headers=req_headers, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_err = e
+    raise last_err
+
+
 # ================= 数据抓取 =================
-def fetch_realtime_quote(secid: str) -> dict:
-    url = "https://push2.eastmoney.com/api/qt/stock/get"
-    params = {"secid": secid, "fields": "f43,f57,f58,f59,f60"}
-    resp = safe_get(url, params=params).json()
-    d = resp["data"]
-    scale = 10 ** int(d["f59"])
-    price = d["f43"] / scale if isinstance(d["f43"], (int, float)) else d["f60"] / scale
-    prev_close = d["f60"] / scale
-    return {"price": price, "prev_close": prev_close}
+def fetch_yahoo_klines(symbol: str, range_str: str = "1y") -> dict:
+    """从 Yahoo Finance 获取美股/汇率日线及最新价"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    resp = safe_get(url, params={"range": range_str, "interval": "1d"}).json()
+    res = resp["chart"]["result"][0]
+    meta = res["meta"]
+    timestamps = res["timestamp"]
+    quote = res["indicators"]["quote"][0]
+    highs = quote["high"]
+    closes = quote["close"]
 
-
-def fetch_klines(secid: str, limit: int = LOOKBACK_DAYS) -> list:
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    params = {
-        "secid": secid,
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56",
-        "klt": "101",
-        "fqt": "1",
-        "end": "20500101",
-        "lmt": str(limit),
-    }
-    resp = safe_get(url, params=params).json()
     rows = []
-    for line in resp["data"]["klines"]:
-        parts = line.split(",")
-        rows.append({"date": parts[0], "close": float(parts[2]), "high": float(parts[3])})
+    for ts, h, c in zip(timestamps, highs, closes):
+        if c is None or h is None:
+            continue
+        # 美股收盘日期按美东时间(UTC-5)格式化
+        dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=-5))).strftime("%Y-%m-%d")
+        rows.append({"date": dt, "close": float(c), "high": float(h)})
+
+    latest_price = float(meta.get("regularMarketPrice") or rows[-1]["close"])
+    return {"price": latest_price, "klines": rows}
+
+
+def fetch_tencent_quotes(symbols: list) -> dict:
+    """从腾讯财经批量获取 A 股 ETF 实时价"""
+    url = f"https://qt.gtimg.cn/q={','.join(symbols)}"
+    text = safe_get(url).text
+    out = {}
+    for line in text.strip().split(";"):
+        if "=" not in line:
+            continue
+        left, right = line.split("=", 1)
+        sym = left.replace("v_", "").strip()
+        parts = right.strip().strip('"').split("~")
+        if len(parts) > 4:
+            price = float(parts[3]) if float(parts[3]) > 0 else float(parts[4])
+            out[sym] = {"price": price, "prev_close": float(parts[4])}
+    return out
+
+
+def fetch_tencent_klines(symbol: str, limit: int = LOOKBACK_DAYS) -> list:
+    """从腾讯财经获取 A 股 ETF 前复权日K线"""
+    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    resp = safe_get(url, params={"param": f"{symbol},day,,,{limit},qfq"}).json()
+    node = resp["data"][symbol]
+    raw = node.get("qfqday") or node.get("day") or []
+    rows = []
+    for item in raw:
+        rows.append({"date": item[0], "close": float(item[2]), "high": float(item[3])})
     return rows
 
 
-def fetch_latest_nav(fund_code: str) -> dict:
-    url = "https://api.fund.eastmoney.com/f10/lsjz"
-    params = {"fundCode": fund_code, "pageIndex": 1, "pageSize": 5}
-    resp = safe_get(url, params=params, headers={"Referer": "https://fundf10.eastmoney.com/"}).json()
-    latest = resp["Data"]["LSJZList"][0]
-    return {"date": latest["FSRQ"], "nav": float(latest["DWJZ"])}
+def fetch_live_iopv(fund_code: str) -> Optional[dict]:
+    """天天基金 CDN 实时估值 + 最新官方净值"""
+    url = f"https://fundgz.1234567.com.cn/js/{fund_code}.js"
+    try:
+        text = safe_get(url, headers={"Referer": "https://fund.eastmoney.com/"}).text.strip()
+        m = re.search(r"jsonpgz\((\{.*\})\)", text)
+        if not m:
+            return None
+        d = json.loads(m.group(1))
+        return {
+            "iopv": float(d["gsz"]),
+            "gztime": d.get("gztime", ""),
+            "nav": float(d["dwjz"]),
+            "nav_date": d.get("jzrq", ""),
+        }
+    except Exception:
+        return None
 
 
-def fetch_nav_high(fund_code: str, limit: int = LOOKBACK_DAYS) -> Optional[dict]:
+def fetch_nav_history(fund_code: str, limit: int = LOOKBACK_DAYS) -> Optional[dict]:
+    """天天基金 CDN 历史净值趋势（用于计算估值前高及兜底最新净值）"""
     url = f"https://fund.eastmoney.com/pingzhongdata/{fund_code}.js"
     try:
         text = safe_get(url, headers={"Referer": "https://fund.eastmoney.com/"}).text
@@ -153,27 +158,12 @@ def fetch_nav_high(fund_code: str, limit: int = LOOKBACK_DAYS) -> Optional[dict]
             return None
         arr = json.loads(m.group(1))[-limit:]
         best = max(arr, key=lambda x: x["y"])
-        dt = datetime.fromtimestamp(best["x"] / 1000, tz=BJT).strftime("%Y-%m-%d")
-        return {"nav_high": float(best["y"]), "nav_high_date": dt}
-    except Exception:
-        return None
-
-
-def fetch_live_iopv(fund_code: str) -> Optional[dict]:
-    url = f"https://fundgz.1234567.com.cn/js/{fund_code}.js"
-    try:
-        text = safe_get(url, headers={"Referer": "https://fund.eastmoney.com/"}).text.strip()
-        m = re.search(r"jsonpgz\((\{.*\})\)", text)
-        if not m:
-            return None
-        d = json.loads(m.group(1))
-        gsz = float(d["gsz"])
-        if gsz <= 0:
-            return None
+        latest = arr[-1]
         return {
-            "iopv": gsz,
-            "gztime": d.get("gztime", ""),
-            "jzrq": d.get("jzrq", ""),
+            "nav_high": float(best["y"]),
+            "nav_high_date": datetime.fromtimestamp(best["x"] / 1000, tz=BJT).strftime("%Y-%m-%d"),
+            "latest_nav": float(latest["y"]),
+            "latest_nav_date": datetime.fromtimestamp(latest["x"] / 1000, tz=BJT).strftime("%Y-%m-%d"),
         }
     except Exception:
         return None
@@ -187,16 +177,18 @@ def find_close_on_or_before(klines: list, target_date: str) -> float:
 
 
 # ================= 核心计算 =================
-def compute_pair_metrics(pair: dict, us_cache: dict, fx_now: float, fx_klines: list) -> dict:
-    if pair["us_secid"] not in us_cache:
-        us_cache[pair["us_secid"]] = fetch_klines(pair["us_secid"])
-    us_klines = us_cache[pair["us_secid"]]
+def compute_pair_metrics(pair: dict, us_cache: dict, cn_quotes: dict, fx_now: float, fx_klines: list) -> dict:
+    cn_sym = f"{pair['cn_market']}{pair['cn_code']}"
+    print(f"正在计算 {pair['cn_name']} ({pair['cn_code']})...", flush=True)
 
-    cn_klines = fetch_klines(pair["cn_secid"])
-    cn_quote = fetch_realtime_quote(pair["cn_secid"])
-    nav_info = fetch_latest_nav(pair["cn_code"])
-    nav_high_info = fetch_nav_high(pair["cn_code"])
+    if pair["us_name"] not in us_cache:
+        us_cache[pair["us_name"]] = fetch_yahoo_klines(pair["us_name"], range_str="1y")
+    us_klines = us_cache[pair["us_name"]]["klines"]
+
+    cn_klines = fetch_tencent_klines(cn_sym)
+    cn_price = cn_quotes[cn_sym]["price"]
     live_iopv_info = fetch_live_iopv(pair["cn_code"])
+    nav_hist = fetch_nav_history(pair["cn_code"])
 
     # 1. 美股前一交易日收盘与前高回撤
     us_latest = us_klines[-1]
@@ -204,36 +196,42 @@ def compute_pair_metrics(pair: dict, us_cache: dict, fx_now: float, fx_klines: l
     us_drawdown = (us_latest["close"] / us_high_row["high"] - 1) * 100
 
     # 2. A股 ETF 实时价与前高回撤
-    cn_price = cn_quote["price"]
     cn_high_row = max(cn_klines, key=lambda x: x["high"])
     cn_high_val = max(cn_high_row["high"], cn_price)
     cn_high_date = datetime.now(BJT).strftime("%Y-%m-%d") if cn_price >= cn_high_row["high"] else cn_high_row["date"]
     cn_drawdown = (cn_price / cn_high_val - 1) * 100
 
-    # 3. 实时估值（不含溢价）：优先用盘中实时估值，否则降级公式推算
-    nav_date = nav_info["date"]
+    # 3. 官方净值与实时估值（不含溢价）
+    if nav_hist and (not live_iopv_info or nav_hist["latest_nav_date"] >= live_iopv_info["nav_date"]):
+        nav_val = nav_hist["latest_nav"]
+        nav_date = nav_hist["latest_nav_date"]
+    elif live_iopv_info:
+        nav_val = live_iopv_info["nav"]
+        nav_date = live_iopv_info["nav_date"]
+    else:
+        raise RuntimeError(f"无法获取 {pair['cn_code']} 净值数据")
+
     us_on_nav_date = find_close_on_or_before(us_klines, nav_date)
     fx_on_nav_date = find_close_on_or_before(fx_klines, nav_date) if fx_klines else fx_now
     fx_ratio = fx_now / fx_on_nav_date if fx_on_nav_date else 1.0
+    k_base = nav_val / us_on_nav_date
 
-    k_base = nav_info["nav"] / us_on_nav_date
-
-    if live_iopv_info and live_iopv_info["jzrq"] >= nav_date:
+    if live_iopv_info and live_iopv_info["iopv"] > 0 and live_iopv_info["nav_date"] >= nav_date:
         iopv_val = live_iopv_info["iopv"]
         iopv_source = f"实时估值 {live_iopv_info['gztime']}"
         k_fair = k_base
     else:
         us_cum_ret = us_latest["close"] / us_on_nav_date - 1
-        iopv_val = nav_info["nav"] * (1 + us_cum_ret * EQUITY_WEIGHT) * fx_ratio
+        iopv_val = nav_val * (1 + us_cum_ret * EQUITY_WEIGHT) * fx_ratio
         iopv_source = "净值公式估算"
         k_fair = k_base * fx_ratio
 
     # 4. 估值前高与估值回撤
-    if nav_high_info:
-        nav_high_val = max(nav_high_info["nav_high"], iopv_val)
-        nav_high_date = datetime.now(BJT).strftime("%Y-%m-%d") if iopv_val >= nav_high_info["nav_high"] else nav_high_info["nav_high_date"]
+    if nav_hist:
+        nav_high_val = max(nav_hist["nav_high"], iopv_val)
+        nav_high_date = datetime.now(BJT).strftime("%Y-%m-%d") if iopv_val >= nav_hist["nav_high"] else nav_hist["nav_high_date"]
     else:
-        nav_high_val = max(nav_info["nav"], iopv_val)
+        nav_high_val = max(nav_val, iopv_val)
         nav_high_date = nav_date
     iopv_drawdown = (iopv_val / nav_high_val - 1) * 100
 
@@ -242,7 +240,7 @@ def compute_pair_metrics(pair: dict, us_cache: dict, fx_now: float, fx_klines: l
     equiv_us_by_iopv = iopv_val / k_fair
     equiv_us_drawdown = (equiv_us_by_iopv / us_high_row["high"] - 1) * 100
 
-    # 6. 计算重要点位对应的各口径区间
+    # 6. 重要点位区间换算
     zone_rows = []
     for z in pair["zones"]:
         dd_low = (z["low"] / us_high_row["high"] - 1) * 100
@@ -275,7 +273,7 @@ def compute_pair_metrics(pair: dict, us_cache: dict, fx_now: float, fx_klines: l
         "cn_high": cn_high_val,
         "cn_high_date": cn_high_date,
         "cn_drawdown": cn_drawdown,
-        "nav": nav_info["nav"],
+        "nav": nav_val,
         "nav_date": nav_date,
         "iopv_val": iopv_val,
         "iopv_source": iopv_source,
@@ -405,7 +403,7 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
   <div class="container">
     <header>
       <h1>QQQ / SPY 与 A股跨境 ETF 盘中监控</h1>
-      <div class="meta">更新时间（北京时间）：{updated_at} ｜ USD/CNH：{fx_now:.4f}</div>
+      <div class="meta">更新时间（北京时间）：{updated_at} ｜ USD/CNY：{fx_now:.4f}</div>
     </header>
     {''.join(cards_html)}
   </div>
@@ -414,19 +412,22 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
 
 
 def main():
-    fx_quote = fetch_realtime_quote("133.USDCNH")
-    try:
-        fx_klines = fetch_klines("133.USDCNH", limit=30)
-    except Exception:
-        fx_klines = []
+    print("正在拉取汇率 (USD/CNY)...", flush=True)
+    fx_data = fetch_yahoo_klines("CNY=X", range_str="1mo")
+    fx_now = fx_data["price"]
+    fx_klines = fx_data["klines"]
+
+    print("正在批量拉取 A股 ETF 实时行情...", flush=True)
+    cn_symbols = [f"{p['cn_market']}{p['cn_code']}" for p in PAIRS]
+    cn_quotes = fetch_tencent_quotes(cn_symbols)
 
     us_cache = {}
-    results = [compute_pair_metrics(p, us_cache, fx_quote["price"], fx_klines) for p in PAIRS]
+    results = [compute_pair_metrics(p, us_cache, cn_quotes, fx_now, fx_klines) for p in PAIRS]
 
     updated_at = datetime.now(BJT).strftime("%Y-%m-%d %H:%M:%S")
-    html = render_html(results, fx_quote["price"], updated_at)
+    html = render_html(results, fx_now, updated_at)
     OUTPUT_HTML.write_text(html, encoding="utf-8")
-    print(f"[{updated_at}] 已更新：{OUTPUT_HTML}")
+    print(f"[{updated_at}] 更新完成：{OUTPUT_HTML}", flush=True)
 
 
 if __name__ == "__main__":
