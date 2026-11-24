@@ -3,22 +3,61 @@
 
 import json
 import re
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ================= 配置项 =================
 OUTPUT_HTML = Path(__file__).resolve().parent / "index.html"
 LOOKBACK_DAYS = 250   # 250 ≈ 52周前高；如需更长周期可调大
 EQUITY_WEIGHT = 0.95  # 降级推算时的权益仓位权重
-TIMEOUT = 10
+TIMEOUT = 15
 BJT = timezone(timedelta(hours=8))
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Referer": "https://fundf10.eastmoney.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": "https://quote.eastmoney.com/",
+    "Connection": "close",
 }
+
+# 构建带自动重试的 Session
+SESSION = requests.Session()
+RETRY_STRATEGY = Retry(
+    total=4,
+    connect=4,
+    read=4,
+    backoff_factor=1.5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
+SESSION.mount("http://", ADAPTER)
+SESSION.mount("https://", ADAPTER)
+
+
+def safe_get(url: str, params: Optional[dict] = None, headers: Optional[dict] = None) -> requests.Response:
+    """带间隔与重试保护的 GET 请求"""
+    time.sleep(0.5)
+    req_headers = HEADERS.copy()
+    if headers:
+        req_headers.update(headers)
+    last_err = None
+    for attempt in range(4):
+        try:
+            resp = SESSION.get(url, params=params, headers=req_headers, timeout=TIMEOUT)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))
+    raise last_err
+
 
 # 重要点位配置（可随时按你的技术面判断调整）
 QQQ_ZONES = [
@@ -70,7 +109,7 @@ PAIRS = [
 def fetch_realtime_quote(secid: str) -> dict:
     url = "https://push2.eastmoney.com/api/qt/stock/get"
     params = {"secid": secid, "fields": "f43,f57,f58,f59,f60"}
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT).json()
+    resp = safe_get(url, params=params).json()
     d = resp["data"]
     scale = 10 ** int(d["f59"])
     price = d["f43"] / scale if isinstance(d["f43"], (int, float)) else d["f60"] / scale
@@ -89,7 +128,7 @@ def fetch_klines(secid: str, limit: int = LOOKBACK_DAYS) -> list:
         "end": "20500101",
         "lmt": str(limit),
     }
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT).json()
+    resp = safe_get(url, params=params).json()
     rows = []
     for line in resp["data"]["klines"]:
         parts = line.split(",")
@@ -100,16 +139,15 @@ def fetch_klines(secid: str, limit: int = LOOKBACK_DAYS) -> list:
 def fetch_latest_nav(fund_code: str) -> dict:
     url = "https://api.fund.eastmoney.com/f10/lsjz"
     params = {"fundCode": fund_code, "pageIndex": 1, "pageSize": 5}
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT).json()
+    resp = safe_get(url, params=params, headers={"Referer": "https://fundf10.eastmoney.com/"}).json()
     latest = resp["Data"]["LSJZList"][0]
     return {"date": latest["FSRQ"], "nav": float(latest["DWJZ"])}
 
 
 def fetch_nav_high(fund_code: str, limit: int = LOOKBACK_DAYS) -> Optional[dict]:
-    """获取近 LOOKBACK_DAYS 个交易日的单位净值前高"""
     url = f"https://fund.eastmoney.com/pingzhongdata/{fund_code}.js"
     try:
-        text = requests.get(url, headers=HEADERS, timeout=TIMEOUT).text
+        text = safe_get(url, headers={"Referer": "https://fund.eastmoney.com/"}).text
         m = re.search(r"Data_netWorthTrend\s*=\s*(\[.*?\]);", text)
         if not m:
             return None
@@ -122,10 +160,9 @@ def fetch_nav_high(fund_code: str, limit: int = LOOKBACK_DAYS) -> Optional[dict]
 
 
 def fetch_live_iopv(fund_code: str) -> Optional[dict]:
-    """优先直连天天基金盘中实时估值接口，与同花顺/东财App保持一致"""
     url = f"https://fundgz.1234567.com.cn/js/{fund_code}.js"
     try:
-        text = requests.get(url, headers=HEADERS, timeout=TIMEOUT).text.strip()
+        text = safe_get(url, headers={"Referer": "https://fund.eastmoney.com/"}).text.strip()
         m = re.search(r"jsonpgz\((\{.*\})\)", text)
         if not m:
             return None
@@ -176,16 +213,14 @@ def compute_pair_metrics(pair: dict, us_cache: dict, fx_now: float, fx_klines: l
     # 3. 实时估值（不含溢价）：优先用盘中实时估值，否则降级公式推算
     nav_date = nav_info["date"]
     us_on_nav_date = find_close_on_or_before(us_klines, nav_date)
-    fx_on_nav_date = find_close_on_or_before(fx_klines, nav_date)
-    fx_ratio = fx_now / fx_on_nav_date
+    fx_on_nav_date = find_close_on_or_before(fx_klines, nav_date) if fx_klines else fx_now
+    fx_ratio = fx_now / fx_on_nav_date if fx_on_nav_date else 1.0
 
-    # 锚定官方净值日期的零溢价换算系数 K（元/美元）
     k_base = nav_info["nav"] / us_on_nav_date
 
     if live_iopv_info and live_iopv_info["jzrq"] >= nav_date:
         iopv_val = live_iopv_info["iopv"]
         iopv_source = f"实时估值 {live_iopv_info['gztime']}"
-        # 若使用实时估值，直接以 k_base 折算等效美股点位
         k_fair = k_base
     else:
         us_cum_ret = us_latest["close"] / us_on_nav_date - 1
@@ -370,7 +405,7 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
   <div class="container">
     <header>
       <h1>QQQ / SPY 与 A股跨境 ETF 盘中监控</h1>
-      <div class="meta">更新时间（北京时间）：{updated_at} ｜ USD/CNH：{fx_now:.4f} ｜ 交易日 10:00 及 10:30-15:10 每 10 分钟刷新</div>
+      <div class="meta">更新时间（北京时间）：{updated_at} ｜ USD/CNH：{fx_now:.4f}</div>
     </header>
     {''.join(cards_html)}
   </div>
@@ -380,7 +415,11 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
 
 def main():
     fx_quote = fetch_realtime_quote("133.USDCNH")
-    fx_klines = fetch_klines("133.USDCNH", limit=30)
+    try:
+        fx_klines = fetch_klines("133.USDCNH", limit=30)
+    except Exception:
+        fx_klines = []
+
     us_cache = {}
     results = [compute_pair_metrics(p, us_cache, fx_quote["price"], fx_klines) for p in PAIRS]
 
