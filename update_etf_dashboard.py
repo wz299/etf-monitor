@@ -92,7 +92,6 @@ def fetch_yahoo_klines(symbol: str, range_str: str = "1y") -> dict:
     for ts, h, c in zip(timestamps, highs, closes):
         if c is None or h is None:
             continue
-        # 美股收盘日期按美东时间(UTC-5)格式化
         dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=-5))).strftime("%Y-%m-%d")
         rows.append({"date": dt, "close": float(c), "high": float(h)})
 
@@ -187,15 +186,19 @@ def compute_pair_metrics(pair: dict, us_cache: dict, cn_quotes: dict, fx_now: fl
 
     cn_klines = fetch_tencent_klines(cn_sym)
     cn_price = cn_quotes[cn_sym]["price"]
+    cn_prev_close = cn_quotes[cn_sym]["prev_close"]
     live_iopv_info = fetch_live_iopv(pair["cn_code"])
     nav_hist = fetch_nav_history(pair["cn_code"])
 
-    # 1. 美股前一交易日收盘与前高回撤
+    # 1. 美股前一交易日收盘、涨跌幅与前高回撤
     us_latest = us_klines[-1]
+    us_prev_close = us_klines[-2]["close"] if len(us_klines) >= 2 else us_latest["close"]
+    us_pct = (us_latest["close"] / us_prev_close - 1) * 100
     us_high_row = max(us_klines, key=lambda x: x["high"])
     us_drawdown = (us_latest["close"] / us_high_row["high"] - 1) * 100
 
-    # 2. A股 ETF 实时价与前高回撤
+    # 2. A股 ETF 实时价、涨跌幅与前高回撤
+    cn_pct = (cn_price / cn_prev_close - 1) * 100 if cn_prev_close else 0.0
     cn_high_row = max(cn_klines, key=lambda x: x["high"])
     cn_high_val = max(cn_high_row["high"], cn_price)
     cn_high_date = datetime.now(BJT).strftime("%Y-%m-%d") if cn_price >= cn_high_row["high"] else cn_high_row["date"]
@@ -225,6 +228,8 @@ def compute_pair_metrics(pair: dict, us_cache: dict, cn_quotes: dict, fx_now: fl
         iopv_val = nav_val * (1 + us_cum_ret * EQUITY_WEIGHT) * fx_ratio
         iopv_source = "净值公式估算"
         k_fair = k_base * fx_ratio
+
+    iopv_pct = (iopv_val / nav_val - 1) * 100 if nav_val else 0.0
 
     # 4. 估值前高与估值回撤
     if nav_hist:
@@ -264,18 +269,21 @@ def compute_pair_metrics(pair: dict, us_cache: dict, cn_quotes: dict, fx_now: fl
         "us_name": pair["us_name"],
         "us_date": us_latest["date"],
         "us_close": us_latest["close"],
+        "us_pct": us_pct,
         "us_high": us_high_row["high"],
         "us_high_date": us_high_row["date"],
         "us_drawdown": us_drawdown,
         "cn_name": pair["cn_name"],
         "cn_code": pair["cn_code"],
         "cn_price": cn_price,
+        "cn_pct": cn_pct,
         "cn_high": cn_high_val,
         "cn_high_date": cn_high_date,
         "cn_drawdown": cn_drawdown,
         "nav": nav_val,
         "nav_date": nav_date,
         "iopv_val": iopv_val,
+        "iopv_pct": iopv_pct,
         "iopv_source": iopv_source,
         "nav_high": nav_high_val,
         "nav_high_date": nav_high_date,
@@ -296,10 +304,18 @@ def badge_class(premium: float) -> str:
     return "badge-ok"
 
 
+def pct_class(val: float) -> str:
+    return "up" if val >= 0 else "down"
+
+
 def render_html(results: list, fx_now: float, updated_at: str) -> str:
     cards_html = []
     for r in results:
         b_cls = badge_class(r["premium_pct"])
+        us_cls = pct_class(r["us_pct"])
+        cn_cls = pct_class(r["cn_pct"])
+        iopv_cls = pct_class(r["iopv_pct"])
+
         rows_html = []
         for z in r["zone_rows"]:
             tr_cls = ' class="active-zone"' if z["is_active"] else ""
@@ -323,21 +339,21 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
           <div class="grid">
             <div class="box">
               <div class="label">美股 {r['us_name']} 收盘价（{r['us_date']}）</div>
-              <div class="value">${r['us_close']:.2f}</div>
+              <div class="value">${r['us_close']:.2f} <span class="{us_cls}">({r['us_pct']:+.2f}%)</span></div>
               <div class="sub">前高：${r['us_high']:.2f}（{r['us_high_date']}）</div>
               <div class="sub">距前高回撤：<strong>{r['us_drawdown']:+.2f}%</strong></div>
             </div>
 
             <div class="box">
               <div class="label">A股 {r['cn_code']} 实时价（含溢价）</div>
-              <div class="value">¥{r['cn_price']:.3f}</div>
+              <div class="value">¥{r['cn_price']:.3f} <span class="{cn_cls}">({r['cn_pct']:+.2f}%)</span></div>
               <div class="sub">前高：¥{r['cn_high']:.3f}（{r['cn_high_date']}）</div>
               <div class="sub">距前高回撤：<strong>{r['cn_drawdown']:+.2f}%</strong></div>
             </div>
 
             <div class="box highlight">
               <div class="label">A股 {r['cn_code']} 实时估值（不含溢价）</div>
-              <div class="value">¥{r['iopv_val']:.4f}</div>
+              <div class="value">¥{r['iopv_val']:.4f} <span class="{iopv_cls}">({r['iopv_pct']:+.2f}%)</span></div>
               <div class="sub">等效 {r['us_name']} 点位：<strong>${r['equiv_us_by_iopv']:.2f}</strong>（距前高 {r['equiv_us_drawdown']:+.2f}%）</div>
               <div class="sub">估值前高：¥{r['nav_high']:.4f}（{r['nav_high_date']}）｜ 回撤：<strong>{r['iopv_drawdown']:+.2f}%</strong></div>
               <div class="sub muted">官方净值 ¥{r['nav']:.4f}（{r['nav_date']}）｜ {r['iopv_source']}</div>
@@ -387,6 +403,8 @@ def render_html(results: list, fx_now: float, updated_at: str) -> str:
     .box.highlight {{ background: #eff6ff; border-color: #bfdbfe; }}
     .label {{ font-size: 12px; color: #6b7280; margin-bottom: 4px; }}
     .value {{ font-size: 22px; font-weight: 700; margin-bottom: 6px; }}
+    .up {{ color: #dc2626; font-size: 15px; font-weight: 600; }}
+    .down {{ color: #16a34a; font-size: 15px; font-weight: 600; }}
     .sub {{ font-size: 12px; color: #374151; line-height: 1.6; }}
     .muted {{ color: #6b7280; font-size: 11px; margin-top: 2px; }}
     .table-wrap {{ overflow-x: auto; }}
